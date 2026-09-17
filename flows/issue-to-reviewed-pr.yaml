@@ -1,4 +1,5 @@
 flow: issue-to-reviewed-pr
+version: v1
 inputs:
   issue:
     source: github.issue
@@ -18,55 +19,73 @@ profiles:
     purpose: planning-implementation-and-ambiguity
 steps:
   - id: intake
-    type: github.issue.read
-    input: issue
-    output: requirements
+    action: github.issue.read
+    inputs: [issue]
+    outputs: [requirements]
+    risk: safe
   - id: inspect-files
-    type: repository.inspect
+    action: repository.inspect
     profile: local-fast
-    input: repository
-    output: file_map
-    parallel_group: reconnaissance
+    inputs: [repository, requirements]
+    outputs: [file_map]
+    needs: [intake]
+    risk: safe
   - id: inspect-tests
-    type: repository.tests
+    action: repository.tests
     profile: local-fast
-    input: repository
-    output: test_map
-    parallel_group: reconnaissance
+    inputs: [repository, requirements]
+    outputs: [test_map]
+    needs: [intake]
+    risk: safe
   - id: inspect-history
-    type: repository.history
+    action: repository.history
     profile: subscription-cheap
-    input: repository
-    output: related_changes
-    parallel_group: reconnaissance
+    inputs: [repository, requirements]
+    outputs: [related_changes]
+    needs: [intake]
+    risk: safe
   - id: plan
-    type: model.plan
+    action: model.plan
     profile: subscription-strong
-    input: [requirements, file_map, test_map, related_changes]
-    output: implementation_plan
+    inputs: [requirements, file_map, test_map, related_changes]
+    outputs: [implementation_plan]
+    needs: [inspect-files, inspect-tests, inspect-history]
+    risk: sensitive
   - id: implement
-    type: repository.edit_worktree
+    action: repository.edit_worktree
     profile: subscription-strong
-    input: implementation_plan
-    output: change_set
-    approval: required-before-write
+    inputs: [implementation_plan]
+    outputs: [change_set]
+    needs: [plan]
+    risk: sensitive
+    approval:
+      action: propose_change
+      required: true
   - id: verify
-    type: repository.verify
-    input: change_set
-    output: verification
-    commands: [tests, lint, format, secret_scan]
+    action: repository.verify
+    inputs: [change_set]
+    outputs: [verification]
+    needs: [implement]
+    risk: safe
+    format: json
   - id: review
-    type: model.review_diff
+    action: model.review_diff
     profile: subscription-cheap
-    input: [requirements, change_set, verification]
-    output: review
+    inputs: [requirements, change_set, verification]
+    outputs: [review]
+    needs: [verify]
+    risk: sensitive
   - id: prepare-pr
-    type: github.pull_request.draft
-    input: [requirements, change_set, verification, review]
-    output: pull_request
-    approval: required-before-external-write
+    action: github.pull_request.draft
+    inputs: [requirements, change_set, verification, review]
+    outputs: [pull_request]
+    needs: [review]
+    risk: sensitive
+    approval:
+      action: create_pull_request
+      required: true
 policy:
-  max_cost_usd: 2.00
+  cost_budget_usd: 2.00
   network: approved-repositories-only
   external_writes: approval-required
-  retain_receipt: true
+  receipt: required
