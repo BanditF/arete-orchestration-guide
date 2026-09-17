@@ -1,0 +1,72 @@
+flow: issue-to-reviewed-pr
+inputs:
+  issue:
+    source: github.issue
+    read_only: true
+  repository:
+    source: github.repository
+    read_only: true
+profiles:
+  local-fast:
+    provider: local
+    purpose: file-inventory-and-test-discovery
+  subscription-cheap:
+    provider: subscription
+    purpose: bounded-reconnaissance-and-diff-review
+  subscription-strong:
+    provider: subscription
+    purpose: planning-implementation-and-ambiguity
+steps:
+  - id: intake
+    type: github.issue.read
+    input: issue
+    output: requirements
+  - id: inspect-files
+    type: repository.inspect
+    profile: local-fast
+    input: repository
+    output: file_map
+    parallel_group: reconnaissance
+  - id: inspect-tests
+    type: repository.tests
+    profile: local-fast
+    input: repository
+    output: test_map
+    parallel_group: reconnaissance
+  - id: inspect-history
+    type: repository.history
+    profile: subscription-cheap
+    input: repository
+    output: related_changes
+    parallel_group: reconnaissance
+  - id: plan
+    type: model.plan
+    profile: subscription-strong
+    input: [requirements, file_map, test_map, related_changes]
+    output: implementation_plan
+  - id: implement
+    type: repository.edit_worktree
+    profile: subscription-strong
+    input: implementation_plan
+    output: change_set
+    approval: required-before-write
+  - id: verify
+    type: repository.verify
+    input: change_set
+    output: verification
+    commands: [tests, lint, format, secret_scan]
+  - id: review
+    type: model.review_diff
+    profile: subscription-cheap
+    input: [requirements, change_set, verification]
+    output: review
+  - id: prepare-pr
+    type: github.pull_request.draft
+    input: [requirements, change_set, verification, review]
+    output: pull_request
+    approval: required-before-external-write
+policy:
+  max_cost_usd: 2.00
+  network: approved-repositories-only
+  external_writes: approval-required
+  retain_receipt: true
